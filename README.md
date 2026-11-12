@@ -52,9 +52,16 @@ host = "server"            # an ssh destination; leave out for this machine
 folder = "~/notes/math"    # the agent's folder on that machine
 ```
 
-Lemat keeps the conversation in `board.lemat.jsonl` next to `board.md`.
-When the engine has lost its session, or you change the engine, Lemat
-sends this history to a new session.
+The agent changes the board only through Lemat's own MCP tools:
+`board_step` writes a step, `board_mark` marks it checked (✓) or wrong
+(⚠, with one sentence about the mistake), `board_read` reads the board,
+`board_open` opens another board or starts a new task. The board stays
+plain Markdown; `docs/board-format.md` describes how it marks the steps.
+Lemat serves the tools over HTTP on localhost, on a free port.
+
+Lemat keeps the conversation in `lemat.jsonl` in the board's folder. All
+boards in one folder share it. When the engine has lost its session, or
+you change the engine, Lemat sends this history to a new session.
 
 Clone with `--recurse-submodules`: Lejce, which runs the agents, is a git
 submodule. `make` fetches it if the folder is empty.

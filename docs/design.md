@@ -77,7 +77,7 @@ forward = true             # forward it to the agent's machine with ssh -R
 
 1. Done: the board shows a Markdown file and redraws it on change.
 2. Done: the conversation through Lejce, with a local engine.
-3. The board's MCP server and its tools.
+3. Done: the board's MCP server and its tools (`docs/board-format.md`).
 4. SSH hosts with forwarded MCP servers.
 5. Questions from the agent in a dialog.
 6. History, and switching engines in a conversation.
