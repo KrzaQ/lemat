@@ -1,5 +1,8 @@
 mod board;
+mod chat;
+mod history;
 mod recent;
+mod settings;
 mod source;
 mod watch;
 
@@ -7,18 +10,52 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 
 use tauri::menu::{Menu, MenuItemBuilder, SubmenuBuilder};
-use tauri::{AppHandle, Runtime};
+use tauri::{AppHandle, Manager, Runtime};
 use tauri_plugin_dialog::DialogExt;
 
 use board::{Board, Snapshot};
+use chat::Chat;
 
 const OPEN: &str = "open";
+const STOP: &str = "stop";
 
 /// The web view asks once on load, because it may miss events sent before
 /// its listener was ready.
 #[tauri::command]
 fn board_current(board: tauri::State<'_, Board>) -> Snapshot {
     board.snapshot()
+}
+
+fn open_board(board: &Board) -> Result<PathBuf, String> {
+    board
+        .snapshot()
+        .path
+        .map(PathBuf::from)
+        .ok_or_else(|| "Najpierw otwórz plik tablicy.".into())
+}
+
+#[tauri::command]
+fn chat_state(board: tauri::State<'_, Board>, chat: tauri::State<'_, Chat>) -> Option<chat::State> {
+    open_board(&board).ok().map(|path| chat.state(&path))
+}
+
+#[tauri::command]
+fn chat_send(
+    text: String,
+    board: tauri::State<'_, Board>,
+    chat: tauri::State<'_, Chat>,
+) -> Result<(), String> {
+    let text = text.trim();
+    if text.is_empty() {
+        return Ok(());
+    }
+    chat.send(open_board(&board)?, text.to_string());
+    Ok(())
+}
+
+#[tauri::command]
+fn chat_stop(chat: tauri::State<'_, Chat>) {
+    chat.stop();
 }
 
 fn menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
@@ -41,6 +78,11 @@ fn menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         .paste()
         .select_all()
         .build()?;
+    // Esc in the window stops too; the menu works wherever the focus is.
+    let stop = MenuItemBuilder::with_id(STOP, "Zatrzymaj agenta")
+        .accelerator("CmdOrCtrl+.")
+        .build(app)?;
+    let conversation = SubmenuBuilder::new(app, "Rozmowa").item(&stop).build()?;
     let window = SubmenuBuilder::new(app, "Okno")
         .minimize()
         .fullscreen()
@@ -58,10 +100,10 @@ fn menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
             .separator()
             .quit()
             .build()?;
-        Menu::with_items(app, &[&lemat, &file, &edit, &window])
+        Menu::with_items(app, &[&lemat, &file, &edit, &conversation, &window])
     }
     #[cfg(not(target_os = "macos"))]
-    Menu::with_items(app, &[&file, &edit, &window])
+    Menu::with_items(app, &[&file, &edit, &conversation, &window])
 }
 
 fn pick_file(app: &AppHandle) {
@@ -97,10 +139,18 @@ pub fn run() {
         .on_menu_event(|app, event| {
             if event.id() == OPEN {
                 pick_file(app);
+            } else if event.id() == STOP {
+                app.state::<Chat>().stop();
             }
         })
-        .invoke_handler(tauri::generate_handler![board_current])
+        .invoke_handler(tauri::generate_handler![
+            board_current,
+            chat_state,
+            chat_send,
+            chat_stop
+        ])
         .setup(|app| {
+            app.manage(Chat::start(app.handle()));
             if let Some(path) = first_board(app.handle()) {
                 board::open_local(app.handle(), path);
             }
