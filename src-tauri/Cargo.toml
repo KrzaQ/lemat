@@ -1,0 +1,30 @@
+[package]
+name = "lemat"
+version = "0.1.0"
+description = "A math board that works with a coding agent"
+authors = ["krzaq"]
+edition = "2021"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[lib]
+# The `_lib` suffix keeps the library name apart from the binary name;
+# Windows builds fail without it (rust-lang/cargo#8519).
+name = "lemat_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# https://tauri.app/concept/size/#cargo-configuration
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true
