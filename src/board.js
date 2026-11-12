@@ -1,7 +1,7 @@
 // The board: the Rust side watches the open file and sends its text on each
 // change; this script draws it with marked and KaTeX.
 
-import { drawMarkdown } from "./math.js";
+import { drawBoard } from "./math.js";
 
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
@@ -43,7 +43,7 @@ function show(snapshot) {
   // Anyone else keeps their place.
   const followEnd = samePath && atBottom();
   const y = samePath ? pane.scrollTop : 0;
-  drawMarkdown(board, snapshot.text);
+  drawBoard(board, snapshot.text);
   pane.scrollTop = followEnd ? pane.scrollHeight : y;
 }
 

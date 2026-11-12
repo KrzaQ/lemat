@@ -7,6 +7,10 @@
   --line: #dddad2;
   --user: #e4e9f2;
   --error: #b3261e;
+  --checked: #2e7d4f;
+  --checked-note: #e3f0e7;
+  --wrong: #c47a00;
+  --wrong-note: #f8ead0;
   color-scheme: light dark;
 }
 
@@ -20,6 +24,10 @@
     --line: #3a3936;
     --user: #2f3644;
     --error: #f2b8b5;
+    --checked: #6cc08b;
+    --checked-note: #23342a;
+    --wrong: #f0b44c;
+    --wrong-note: #3d311c;
   }
 }
 
@@ -60,6 +68,41 @@ body {
   background: var(--note);
   font-size: 0.9rem;
   text-align: center;
+}
+
+/* Steps and their marks (docs/board-format.md) */
+
+#board .board-step {
+  margin: 1.2rem 0;
+  padding: 0.1rem 0 0.1rem 1rem;
+  border-left: 3px solid var(--line);
+}
+
+#board .board-step.checked {
+  border-left-color: var(--checked);
+}
+
+#board .board-step.wrong {
+  border-left-color: var(--wrong);
+}
+
+#board .board-step blockquote {
+  margin: 0.6rem 0 0.2rem;
+  padding: 0.35rem 0.75rem;
+  border-radius: 0.4rem;
+  font-size: 0.95rem;
+}
+
+#board .board-step blockquote p {
+  margin: 0;
+}
+
+#board .board-step.checked blockquote {
+  background: var(--checked-note);
+}
+
+#board .board-step.wrong blockquote {
+  background: var(--wrong-note);
 }
 
 #board-pane {
