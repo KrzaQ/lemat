@@ -52,6 +52,36 @@ host = "server"            # an ssh destination; leave out for this machine
 folder = "~/notes/math"    # the agent's folder on that machine
 ```
 
+### A project on another machine
+
+To keep the boards on a server, next to your notes there, open a project
+file instead of a board: any `.toml` file with the settings above and a
+`board` key. Keep it anywhere on this machine, for example
+`~/lemat/analysis.toml`:
+
+```toml
+engine = "claude"
+model = "opus"
+host = "server"            # an ssh destination
+folder = "~/notes/math"    # the project folder there
+board = "limit.md"         # the board, inside the folder
+```
+
+Lemat then runs the agent in that folder over SSH, keeps the board and
+the history there, and forwards its MCP server to the agent with
+`ssh -R`. It reads the board over one shared SSH connection
+(ControlMaster) twice a second, so an edit there shows up within a
+second. SSH must log in without a password prompt (a key or an agent).
+When it cannot connect, or the folder is missing, a note at the top of
+the board says so, and Lemat tries again every five seconds.
+
+Lemat names the agent's session explicitly, so a Claude Code in a
+terminal in the same folder never gets its conversation. But the
+agent's Claude Code still runs your hooks from its settings. If a hook
+binds to a folder (a chat bridge, say), give Lemat a subfolder of its
+own, such as `~/notes/math/lemat`: Claude Code still reads the
+`CLAUDE.md` files of the folders above it.
+
 The agent changes the board only through Lemat's own MCP tools:
 `board_step` writes a step, `board_mark` marks it checked (✓) or wrong
 (⚠, with one sentence about the mistake), `board_read` reads the board,
@@ -59,7 +89,8 @@ The agent changes the board only through Lemat's own MCP tools:
 plain Markdown; `docs/board-format.md` describes how it marks the steps.
 Lemat serves the tools over HTTP on localhost, on a free port.
 
-Lemat keeps the conversation in `lemat.jsonl` in the board's folder. All
+Lemat keeps the conversation in `lemat.jsonl` in the board's folder, on
+the machine where the board is. All
 boards in one folder share it. When the engine has lost its session, or
 you change the engine, Lemat sends this history to a new session.
 
