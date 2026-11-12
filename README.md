@@ -28,6 +28,14 @@ make build    # release bundle
 
 `make help` lists all targets.
 
+## Use
+
+Open a board file with `lemat path/to/board.md`, or with Plik → Otwórz
+(File → Open, ⌘O). With `make run`, pass the file as
+`make run BOARD=board.md`. Lemat opens the last file again on the next
+start. It redraws the board within a second when the file changes, for
+example after an edit in another editor.
+
 ## License
 
 MIT or Apache 2.0, at your choice. KaTeX and marked (in `src/vendor/`)
