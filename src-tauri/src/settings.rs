@@ -1,4 +1,5 @@
-//! The project's settings: `lemat.toml` next to the board file.
+//! The project's settings: `lemat.toml` next to a board file, or a
+//! project file of its own that Lemat opens (`studies.toml`).
 //!
 //! ```toml
 //! engine = "claude"          # claude, pi
@@ -6,6 +7,7 @@
 //! effort = "medium"          # optional
 //! host = "server"            # an ssh destination; leave out for this machine
 //! folder = "~/notes/math"    # the project folder on that machine
+//! board = "boards/limit.md"  # a project file: the board, inside the folder
 //! ```
 
 use std::fs;
@@ -24,6 +26,8 @@ pub struct Settings {
     pub effort: Option<String>,
     pub host: Option<String>,
     pub folder: Option<String>,
+    /// The board a project file opens, relative to `folder`.
+    pub board: Option<String>,
     /// MCP servers come in step 3 of the design. Kept here so that a file
     /// written for that step still loads.
     #[serde(rename = "mcp")]
@@ -38,6 +42,7 @@ impl Default for Settings {
             effort: None,
             host: None,
             folder: None,
+            board: None,
             mcp: None,
         }
     }
@@ -85,7 +90,7 @@ impl Settings {
 
 /// "~/notes" on this machine. A remote folder stays as it is: the remote
 /// shell expands it.
-fn expand_home(folder: &str) -> PathBuf {
+pub fn expand_home(folder: &str) -> PathBuf {
     match (folder.strip_prefix("~/"), std::env::var_os("HOME")) {
         (Some(rest), Some(home)) => PathBuf::from(home).join(rest),
         _ => PathBuf::from(folder),

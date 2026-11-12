@@ -8,13 +8,12 @@ use std::time::Duration;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
+use crate::project::{self, Place, Target};
 use crate::recent::Recent;
-use crate::source::{BoardSource, LocalFile};
 use crate::watch::Watch;
 
-/// Short enough that an edit in another editor shows up at once, long
-/// enough that the poll costs nothing.
-const POLL: Duration = Duration::from_millis(250);
+/// How long to wait before trying an unreachable project again.
+const RETRY: Duration = Duration::from_secs(5);
 
 /// The event the web view listens to.
 pub const EVENT: &str = "board";
@@ -26,9 +25,13 @@ pub struct Snapshot {
     /// Grows with each change, so that the web view can drop an answer
     /// older than an event it already drew.
     pub version: u64,
+    /// The board's place as the user reads it, "server:/notes/board.md"
+    /// for a remote one.
     pub path: Option<String>,
     pub text: Option<String>,
     pub error: Option<String>,
+    /// The project is open: the conversation can start.
+    pub ready: bool,
 }
 
 #[derive(Default)]
@@ -38,6 +41,8 @@ struct State {
     /// so an old thread cannot write over the file opened after it.
     generation: u64,
     snapshot: Snapshot,
+    /// None until the project is open (an SSH project connects first).
+    place: Option<Place>,
 }
 
 #[derive(Default)]
@@ -47,58 +52,106 @@ impl Board {
     pub fn snapshot(&self) -> Snapshot {
         self.0.lock().unwrap().snapshot.clone()
     }
+
+    pub fn place(&self) -> Option<Place> {
+        self.0.lock().unwrap().place.clone()
+    }
 }
 
-pub fn open_local(app: &AppHandle, path: PathBuf) {
-    open(app, LocalFile::new(path));
+/// Opens a board file or a project file.
+pub fn open(app: &AppHandle, target: Target) {
+    remember(app, target.path().to_path_buf());
+    let label = target.path().display().to_string();
+    start(app, label, move || project::open(&target));
 }
 
-fn open<S: BoardSource>(app: &AppHandle, source: S) {
-    let location = source.location();
+/// Opens another board of the open project: the board tools do this.
+pub fn open_place(app: &AppHandle, place: Place) {
+    if let Target::Board(_) = place.project.source {
+        remember(app, place.board.clone());
+    }
+    start(app, place.label(), move || Ok(place.clone()));
+}
+
+/// Changes the snapshot if this thread's open is still the current one.
+/// Returns false when a newer open took over.
+fn update(app: &AppHandle, generation: u64, change: impl FnOnce(&mut State)) -> bool {
     let board = app.state::<Board>();
+    let snapshot = {
+        let mut state = board.0.lock().unwrap();
+        if state.generation != generation {
+            return false;
+        }
+        change(&mut state);
+        state.snapshot.version += 1;
+        state.snapshot.clone()
+    };
+    let _ = app.emit(EVENT, snapshot);
+    true
+}
+
+fn start(
+    app: &AppHandle,
+    label: String,
+    mut resolve: impl FnMut() -> Result<Place, String> + Send + 'static,
+) {
     let generation = {
+        let board = app.state::<Board>();
         let mut state = board.0.lock().unwrap();
         state.generation += 1;
+        state.place = None;
         state.snapshot = Snapshot {
             version: state.snapshot.version + 1,
-            path: Some(location.clone()),
+            path: Some(label),
+            error: Some("Otwieram…".into()),
             ..Snapshot::default()
         };
         state.generation
     };
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.set_title(&format!("{} — Lemat", source.name()));
-    }
-    remember(app, PathBuf::from(location));
-
     let app = app.clone();
     std::thread::spawn(move || {
-        let mut watch = Watch::new(source);
-        loop {
-            let change = watch.poll();
-            let board = app.state::<Board>();
-            let snapshot = {
-                let mut state = board.0.lock().unwrap();
-                if state.generation != generation {
-                    return;
-                }
-                change.map(|change| {
-                    let current = &mut state.snapshot;
-                    current.version += 1;
-                    match change {
-                        Ok(text) => {
-                            current.text = Some(text);
-                            current.error = None;
-                        }
-                        Err(error) => current.error = Some(error),
+        // A project on another host may be unreachable for a while: say
+        // why, and try again.
+        let place = loop {
+            match resolve() {
+                Ok(place) => break place,
+                Err(error) => {
+                    if !update(&app, generation, |s| s.snapshot.error = Some(error)) {
+                        return;
                     }
-                    current.clone()
-                })
-            };
-            if let Some(snapshot) = snapshot {
-                let _ = app.emit(EVENT, snapshot);
+                    std::thread::sleep(RETRY);
+                }
             }
-            std::thread::sleep(POLL);
+        };
+        let ready = update(&app, generation, |s| {
+            s.snapshot.path = Some(place.label());
+            s.snapshot.error = None;
+            s.snapshot.ready = true;
+            s.place = Some(place.clone());
+        });
+        if !ready {
+            return;
+        }
+        if let Some(window) = app.get_webview_window("main") {
+            let _ = window.set_title(&place.title());
+        }
+        let files = place.project.files.clone();
+        let mut watch = Watch::new(files.clone(), place.board.clone());
+        loop {
+            let current = match watch.poll() {
+                Some(change) => update(&app, generation, |s| match change {
+                    Ok(text) => {
+                        s.snapshot.text = Some(text);
+                        s.snapshot.error = None;
+                    }
+                    Err(error) => s.snapshot.error = Some(error),
+                }),
+                None => app.state::<Board>().0.lock().unwrap().generation == generation,
+            };
+            if !current {
+                return;
+            }
+            std::thread::sleep(files.poll());
         }
     });
 }

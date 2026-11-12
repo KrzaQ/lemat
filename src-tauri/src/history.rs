@@ -6,12 +6,13 @@
 //! The engine's session only saves sending the history again. A `session`
 //! line records each engine session, so that the next start resumes it.
 
-use std::fs::{self, OpenOptions};
-use std::io::{self, Write};
+use std::io;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+
+use crate::files::Files;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(tag = "kind", rename_all = "lowercase")]
@@ -51,8 +52,8 @@ pub fn path_for(board: &Path) -> PathBuf {
 
 /// A missing file is an empty history. A broken line is skipped: one bad
 /// line must not lose the rest.
-pub fn load(path: &Path) -> Vec<Entry> {
-    let Ok(text) = fs::read_to_string(path) else {
+pub fn load(files: &dyn Files, path: &Path) -> Vec<Entry> {
+    let Ok(text) = files.read(path) else {
         return Vec::new();
     };
     text.lines()
@@ -61,14 +62,10 @@ pub fn load(path: &Path) -> Vec<Entry> {
         .collect()
 }
 
-pub fn append(path: &Path, entry: &Entry) -> io::Result<()> {
+pub fn append(files: &dyn Files, path: &Path, entry: &Entry) -> io::Result<()> {
     let mut line = serde_json::to_string(entry).map_err(io::Error::other)?;
     line.push('\n');
-    OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)?
-        .write_all(line.as_bytes())
+    files.append(path, &line)
 }
 
 /// The session to resume: the latest one, if the same engine made it. After
@@ -111,7 +108,10 @@ pub fn now() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::files::Local;
     use serde_json::json;
+    use std::fs;
+    use std::io::Write;
 
     fn user(text: &str) -> Entry {
         Entry::User {
@@ -150,24 +150,24 @@ mod tests {
         let path = dir.path().join("b.lemat.jsonl");
         let entries = vec![session("claude", "s1"), user("dziel przez n"), agent("ok")];
         for entry in &entries {
-            append(&path, entry).unwrap();
+            append(&Local, &path, entry).unwrap();
         }
-        assert_eq!(load(&path), entries);
+        assert_eq!(load(&Local, &path), entries);
     }
 
     #[test]
     fn broken_line_is_skipped() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("b.lemat.jsonl");
-        append(&path, &user("a")).unwrap();
+        append(&Local, &path, &user("a")).unwrap();
         fs::OpenOptions::new()
             .append(true)
             .open(&path)
             .unwrap()
             .write_all(b"{ broken\n")
             .unwrap();
-        append(&path, &user("b")).unwrap();
-        assert_eq!(load(&path), vec![user("a"), user("b")]);
+        append(&Local, &path, &user("b")).unwrap();
+        assert_eq!(load(&Local, &path), vec![user("a"), user("b")]);
     }
 
     #[test]

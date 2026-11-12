@@ -2,18 +2,21 @@
 //! instead of editing the board file. `docs/board-format.md` describes the
 //! file they write.
 
-use std::fs;
-use std::path::{Component, Path, PathBuf};
+use std::io;
+use std::path::Path;
 
 use serde_json::{json, Value};
 
 use crate::document::{self, Document, State};
 use crate::mcp::Toolbox;
+use crate::project::{inside, Place};
 
-/// Where the tools find the open board, and how they open another.
+/// Where the tools find the open board, and how they open another. The
+/// board may be on another machine: the tools reach it through the
+/// project's files.
 pub trait Desk: Send + Sync + 'static {
-    fn current(&self) -> Option<PathBuf>;
-    fn open(&self, path: PathBuf);
+    fn current(&self) -> Option<Place>;
+    fn open(&self, place: Place);
 }
 
 pub struct BoardTools<D> {
@@ -25,26 +28,39 @@ impl<D: Desk> BoardTools<D> {
         Self { desk }
     }
 
-    fn board(&self) -> Result<PathBuf, String> {
+    fn place(&self) -> Result<Place, String> {
         self.desk
             .current()
             .ok_or_else(|| "No board is open in Lemat.".into())
     }
 
-    fn read(&self) -> Result<(PathBuf, String), String> {
-        let path = self.board()?;
-        let text = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-        Ok((path, text))
+    fn read(&self) -> Result<(Place, String), String> {
+        let place = self.place()?;
+        let files = &place.project.files;
+        let text = files
+            .read(&place.board)
+            .map_err(|e| format!("{}: {e}", files.label(&place.board)))?;
+        Ok((place, text))
     }
 
     fn change(
         &self,
         edit: impl FnOnce(&mut Document) -> Result<String, String>,
     ) -> Result<String, String> {
-        let (path, text) = self.read()?;
+        let place = self.place()?;
+        let files = &place.project.files;
+        // A board that does not exist yet starts empty: a project file may
+        // name a board before the first step.
+        let text = match files.read(&place.board) {
+            Ok(text) => text,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => String::new(),
+            Err(e) => return Err(format!("{}: {e}", files.label(&place.board))),
+        };
         let mut document = Document::parse(&text);
         let reply = edit(&mut document)?;
-        fs::write(&path, document.render()).map_err(|e| format!("{}: {e}", path.display()))?;
+        files
+            .write(&place.board, &document.render())
+            .map_err(|e| format!("{}: {e}", files.label(&place.board)))?;
         Ok(reply)
     }
 
@@ -54,31 +70,28 @@ impl<D: Desk> BoardTools<D> {
     }
 
     fn board_read(&self) -> Result<String, String> {
-        let (path, text) = self.read()?;
-        Ok(Self::show(&path, &text))
+        let (place, text) = self.read()?;
+        Ok(Self::show(&place.board, &text))
     }
 
     fn board_open(&self, args: &Value) -> Result<String, String> {
         let file = text(args, "file")?;
-        let folder = self
-            .board()?
-            .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_default();
+        let current = self.place()?;
+        let folder = current.board.parent().unwrap_or(Path::new(""));
         let path = folder.join(inside(file)?);
-        if !path.exists() {
+        let files = &current.project.files;
+        if !files.exists(&path).map_err(|e| e.to_string())? {
             let (Some(title), Some(task)) = (args["title"].as_str(), args["task"].as_str()) else {
                 return Err(format!(
                     "{file} does not exist. Give a title and a task to start a new board."
                 ));
             };
-            if let Some(parent) = path.parent() {
-                fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-            }
-            fs::write(&path, document::new_board(title, task)).map_err(|e| e.to_string())?;
+            files
+                .write(&path, &document::new_board(title, task))
+                .map_err(|e| e.to_string())?;
         }
-        let text = fs::read_to_string(&path).map_err(|e| format!("{file}: {e}"))?;
-        self.desk.open(path.clone());
+        let text = files.read(&path).map_err(|e| format!("{file}: {e}"))?;
+        self.desk.open(current.with_board(path.clone()));
         Ok(Self::show(&path, &text))
     }
 
@@ -120,19 +133,6 @@ fn number(args: &Value, name: &str) -> Result<Option<u32>, String> {
             .map(Some)
             .ok_or_else(|| format!("{name} is a step number from 1.")),
     }
-}
-
-/// A Markdown file inside the board's folder: the tools must not reach
-/// other files on this machine.
-fn inside(file: &str) -> Result<PathBuf, String> {
-    let path = PathBuf::from(file);
-    let plain = path.components().all(|c| matches!(c, Component::Normal(_)));
-    if !plain || path.extension().is_none_or(|e| e != "md") {
-        return Err(format!(
-            "{file}: give a .md file inside the board's folder, as a relative path."
-        ));
-    }
-    Ok(path)
 }
 
 impl<D: Desk> Toolbox for BoardTools<D> {
@@ -206,23 +206,31 @@ impl<D: Desk> Toolbox for BoardTools<D> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::project::{open, Target};
+    use std::fs;
+    use std::path::PathBuf;
     use std::sync::Mutex;
 
-    struct FakeDesk(Mutex<Option<PathBuf>>);
+    struct FakeDesk(Mutex<Option<Place>>);
 
     impl Desk for FakeDesk {
-        fn current(&self) -> Option<PathBuf> {
+        fn current(&self) -> Option<Place> {
             self.0.lock().unwrap().clone()
         }
-        fn open(&self, path: PathBuf) {
-            *self.0.lock().unwrap() = Some(path);
+        fn open(&self, place: Place) {
+            *self.0.lock().unwrap() = Some(place);
         }
     }
 
     fn tools(dir: &Path) -> BoardTools<FakeDesk> {
         let board = dir.join("granica.md");
         fs::write(&board, "# Granica\n\nOblicz.\n").unwrap();
-        BoardTools::new(FakeDesk(Mutex::new(Some(board))))
+        let place = open(&Target::Board(board)).unwrap();
+        BoardTools::new(FakeDesk(Mutex::new(Some(place))))
+    }
+
+    fn current(tools: &BoardTools<FakeDesk>) -> PathBuf {
+        tools.desk.current().unwrap().board
     }
 
     #[test]
@@ -247,6 +255,16 @@ mod tests {
         assert!(text.contains("<!-- mark wrong -->\n> ⚠ Źle."));
         let read = tools.call("board_read", &json!({})).unwrap();
         assert!(read.starts_with("Board file: granica.md\n\n# Granica"));
+    }
+
+    #[test]
+    fn first_step_creates_a_missing_board() {
+        let dir = tempfile::tempdir().unwrap();
+        let tools = tools(dir.path());
+        fs::remove_file(dir.path().join("granica.md")).unwrap();
+        tools.call("board_step", &json!({ "note": "a" })).unwrap();
+        let text = fs::read_to_string(dir.path().join("granica.md")).unwrap();
+        assert_eq!(text, "<!-- step 1 -->\n**1.** a\n");
     }
 
     #[test]
@@ -280,7 +298,7 @@ mod tests {
             )
             .unwrap();
         assert!(reply.contains("# Szereg"));
-        assert_eq!(tools.desk.current(), Some(dir.path().join("zad/nowa.md")));
+        assert_eq!(current(&tools), dir.path().join("zad/nowa.md"));
     }
 
     #[test]

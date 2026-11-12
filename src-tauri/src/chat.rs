@@ -5,16 +5,19 @@
 //! `chat` (a new history entry), `chat-progress` (the agent's work while it
 //! runs) and `chat-running`.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
-use lejce::{Answer, Canceller, Conversation, Engine, Error, McpServer, Session, Setup, Tools};
+use lejce::{
+    Answer, Canceller, Conversation, Engine, Error, Host, McpServer, Session, Setup, Tools,
+};
 use serde::Serialize;
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::history::{self, Entry};
+use crate::project::{Place, Project, Target};
 use crate::settings::Settings;
 
 pub struct Chat {
@@ -24,7 +27,7 @@ pub struct Chat {
 }
 
 struct Job {
-    board: PathBuf,
+    place: Place,
     text: String,
 }
 
@@ -47,15 +50,15 @@ impl Chat {
         }
     }
 
-    pub fn state(&self, board: &Path) -> State {
+    pub fn state(&self, place: &Place) -> State {
         State {
-            entries: history::load(&history::path_for(board)),
+            entries: history::load(place.project.files.as_ref(), &place.history()),
             running: self.running.lock().unwrap().is_some(),
         }
     }
 
-    pub fn send(&self, board: PathBuf, text: String) {
-        let _ = self.jobs.lock().unwrap().send(Job { board, text });
+    pub fn send(&self, place: Place, text: String) {
+        let _ = self.jobs.lock().unwrap().send(Job { place, text });
     }
 
     /// Stops the running message, with the tools the engine started.
@@ -66,10 +69,11 @@ impl Chat {
     }
 }
 
-/// The open engine and what it was opened for. A board in another folder
-/// (another project) or different settings need a new engine process.
+/// The open engine and what it was opened for. Another project, a board
+/// with another history, or different settings need a new engine process.
 struct Open {
-    folder: PathBuf,
+    project: Arc<Project>,
+    history: PathBuf,
     settings: Settings,
     conversation: Conversation,
 }
@@ -83,17 +87,67 @@ fn work(app: AppHandle, inbox: Receiver<Job>, board_tools: String) {
     }
 }
 
+/// The settings as they are now, so that a change of model or engine
+/// applies to the next message. Where the files live stays as it was when
+/// the project opened: that needs a new connection, so it waits for the
+/// next open.
+fn settings_now(project: &Project, board: &std::path::Path) -> Result<Settings, String> {
+    match &project.source {
+        Target::Board(_) => Settings::for_board(board),
+        Target::Project(file) => {
+            let text = std::fs::read_to_string(file).map_err(|e| e.to_string())?;
+            let mut settings = Settings::parse(&text)?;
+            settings.host.clone_from(&project.settings.host);
+            settings.folder.clone_from(&project.settings.folder);
+            settings.board.clone_from(&project.settings.board);
+            Ok(settings)
+        }
+    }
+}
+
+/// Lejce's failures, said so that the user knows what to do.
+fn explain(error: &Error, host: Option<&str>) -> String {
+    let text = error.to_string();
+    let server = host.unwrap_or("serwerem");
+    if text.contains("port forwarding failed") {
+        return format!(
+            "Port tunelu do narzędzi tablicy na {server} jest zajęty. Wyślij jeszcze raz."
+        );
+    }
+    const SSH: [&str; 6] = [
+        "Could not resolve hostname",
+        "Connection refused",
+        "timed out",
+        "Permission denied",
+        "Host key verification failed",
+        "Connection closed",
+    ];
+    if let Some(line) = text.lines().find(|l| SSH.iter().any(|s| l.contains(s))) {
+        return format!(
+            "Nie można połączyć się z {server} przez SSH: {}",
+            line.trim()
+        );
+    }
+    if text.contains("No such file or directory") && text.contains("cd") {
+        return format!("Na {server} nie ma folderu projektu.");
+    }
+    if text.contains("command not found") {
+        return format!("Na {server} nie ma programu silnika: {}", text.trim());
+    }
+    match error {
+        Error::Cancelled => "Zatrzymano.".into(),
+        _ => text,
+    }
+}
+
 fn handle(app: &AppHandle, open: &mut Option<Open>, job: Job, board_tools: &str) {
-    let path = history::path_for(&job.board);
-    let folder = job
-        .board
-        .parent()
-        .map(Path::to_path_buf)
-        .unwrap_or_default();
-    let earlier = history::load(&path);
+    let place = &job.place;
+    let files = place.project.files.clone();
+    let path = place.history();
+    let earlier = history::load(files.as_ref(), &path);
     let record = |entry: Entry| {
-        if let Err(e) = history::append(&path, &entry) {
-            eprintln!("lemat: cannot save {}: {e}", path.display());
+        if let Err(e) = history::append(files.as_ref(), &path, &entry) {
+            eprintln!("lemat: cannot save {}: {e}", files.label(&path));
         }
         let _ = app.emit("chat", entry);
     };
@@ -102,42 +156,53 @@ fn handle(app: &AppHandle, open: &mut Option<Open>, job: Job, board_tools: &str)
         time: history::now(),
     });
 
-    let settings = match Settings::for_board(&job.board) {
+    let settings = match settings_now(&place.project, &place.board) {
         Ok(s) => s,
         Err(e) => return record(failure(format!("Ustawienia: {e}"), json!({}))),
     };
-    if open
-        .as_ref()
-        .is_some_and(|o| o.folder != folder || o.settings != settings)
-    {
+    let same = |o: &Open| {
+        Arc::ptr_eq(&o.project, &place.project) && o.history == path && o.settings == settings
+    };
+    if open.as_ref().is_some_and(|o| !same(o)) {
         if let Some(o) = open.take() {
             o.conversation.close();
         }
     }
+    let engine_host = match &place.project.source {
+        Target::Board(_) => settings.host(&place.board),
+        Target::Project(_) => place.project.engine.clone(),
+    };
+    let host = match &engine_host {
+        Host::Ssh { destination, .. } => Some(destination.as_str()),
+        Host::Local { .. } => None,
+    };
 
-    // A new engine session first gets the history; one that the engine
-    // has lost gets it in a new session, once.
-    for attempt in 0..2 {
+    // A session the engine has lost gets the history in a new session,
+    // once. A taken tunnel port gets one more try on another random port.
+    let mut session_gone = false;
+    let mut port_taken = false;
+    loop {
         let mut replay = false;
         if open.is_none() {
-            let resume = if attempt == 0 {
-                history::last_session(&earlier, &settings.engine)
-            } else {
+            let resume = if session_gone {
                 None
+            } else {
+                history::last_session(&earlier, &settings.engine)
             };
             replay = resume.is_none();
-            match start(&job.board, &settings, resume, board_tools) {
+            match start(&engine_host, &settings, resume, board_tools) {
                 Ok((conversation, new_session)) => {
                     if let Some(entry) = new_session {
                         record(entry);
                     }
                     *open = Some(Open {
-                        folder: folder.clone(),
+                        project: place.project.clone(),
+                        history: path.clone(),
                         settings: settings.clone(),
                         conversation,
                     });
                 }
-                Err(e) => return record(failure(e.to_string(), json!({}))),
+                Err(e) => return record(failure(explain(&e, host), json!({}))),
             }
         }
         let current = open.as_mut().expect("opened above");
@@ -175,9 +240,11 @@ fn handle(app: &AppHandle, open: &mut Option<Open>, job: Job, board_tools: &str)
             o.conversation.close();
         }
         match error {
-            Error::SessionGone if attempt == 0 => continue,
-            Error::Cancelled => return record(failure("Zatrzymano.".into(), work)),
-            other => return record(failure(other.to_string(), work)),
+            Error::SessionGone if !session_gone => session_gone = true,
+            ref e if !port_taken && e.to_string().contains("port forwarding failed") => {
+                port_taken = true
+            }
+            other => return record(failure(explain(&other, host), work)),
         }
     }
 }
@@ -193,7 +260,7 @@ fn failure(text: String, work: Value) -> Entry {
 /// Starts the engine. With no session to resume, it starts a new one and
 /// returns the history entry that names it.
 fn start(
-    board: &Path,
+    host: &Host,
     settings: &Settings,
     resume: Option<String>,
     board_tools: &str,
@@ -211,11 +278,10 @@ fn start(
             (Session::New(id), Some(entry))
         }
     };
-    let host = settings.host(board);
     let setup = Setup {
         engine,
         system: SYSTEM.into(),
-        host,
+        host: host.clone(),
         model: settings.model.clone(),
         effort: settings.effort.clone(),
         project: true,
@@ -266,6 +332,28 @@ about the material get an answer in the chat, not on the board.";
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn explains_ssh_failures_in_polish() {
+        let failed = |stderr: &str| Error::NoAnswer {
+            engine: Engine::Claude,
+            stderr: stderr.into(),
+        };
+        let port = failed("Error: remote port forwarding failed for listen port 31337");
+        assert!(explain(&port, Some("server")).contains("Port tunelu"));
+        let dns = failed("ssh: Could not resolve hostname server: nodename nor servname");
+        assert!(explain(&dns, Some("server")).starts_with("Nie można połączyć się z server"));
+        let folder = failed("sh: line 1: cd: /x: No such file or directory");
+        assert_eq!(
+            explain(&folder, Some("server")),
+            "Na server nie ma folderu projektu."
+        );
+        assert_eq!(explain(&Error::Cancelled, None), "Zatrzymano.");
+        assert_eq!(
+            explain(&failed("boom"), None),
+            "claude gave no answer: boom"
+        );
+    }
 
     #[test]
     fn prompt_names_every_board_tool() {

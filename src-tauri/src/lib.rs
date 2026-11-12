@@ -2,11 +2,12 @@ mod board;
 mod board_tools;
 mod chat;
 mod document;
+mod files;
 mod history;
 mod mcp;
+mod project;
 mod recent;
 mod settings;
-mod source;
 mod watch;
 
 use std::ffi::OsString;
@@ -26,12 +27,12 @@ const STOP: &str = "stop";
 struct Desk(AppHandle);
 
 impl board_tools::Desk for Desk {
-    fn current(&self) -> Option<PathBuf> {
-        self.0.state::<Board>().snapshot().path.map(PathBuf::from)
+    fn current(&self) -> Option<project::Place> {
+        self.0.state::<Board>().place()
     }
 
-    fn open(&self, path: PathBuf) {
-        board::open_local(&self.0, path);
+    fn open(&self, place: project::Place) {
+        board::open_place(&self.0, place);
     }
 }
 
@@ -42,17 +43,15 @@ fn board_current(board: tauri::State<'_, Board>) -> Snapshot {
     board.snapshot()
 }
 
-fn open_board(board: &Board) -> Result<PathBuf, String> {
+fn open_board(board: &Board) -> Result<project::Place, String> {
     board
-        .snapshot()
-        .path
-        .map(PathBuf::from)
-        .ok_or_else(|| "Najpierw otwórz plik tablicy.".into())
+        .place()
+        .ok_or_else(|| "Najpierw otwórz tablicę albo projekt.".into())
 }
 
 #[tauri::command]
 fn chat_state(board: tauri::State<'_, Board>, chat: tauri::State<'_, Chat>) -> Option<chat::State> {
-    open_board(&board).ok().map(|path| chat.state(&path))
+    open_board(&board).ok().map(|place| chat.state(&place))
 }
 
 #[tauri::command]
@@ -126,10 +125,10 @@ fn pick_file(app: &AppHandle) {
     let app = app.clone();
     app.dialog()
         .file()
-        .add_filter("Markdown", &["md", "markdown", "txt"])
+        .add_filter("Tablica albo projekt", &["md", "markdown", "txt", "toml"])
         .pick_file(move |picked| {
             if let Some(path) = picked.and_then(|p| p.into_path().ok()) {
-                board::open_local(&app, path);
+                board::open(&app, project::Target::from_path(path));
             }
         });
 }
@@ -170,7 +169,7 @@ pub fn run() {
             let server = mcp::serve("lemat", tools)?;
             app.manage(Chat::start(app.handle(), server.url));
             if let Some(path) = first_board(app.handle()) {
-                board::open_local(app.handle(), path);
+                board::open(app.handle(), project::Target::from_path(path));
             }
             Ok(())
         })
