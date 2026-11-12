@@ -10,9 +10,22 @@
     <script src="vendor/katex/katex.min.js"></script>
     <script src="vendor/katex/auto-render.min.js"></script>
     <script type="module" src="board.js"></script>
+    <script type="module" src="chat.js"></script>
   </head>
   <body>
-    <p id="note" role="status" hidden></p>
-    <main id="board"></main>
+    <section id="board-pane">
+      <p id="note" role="status" hidden></p>
+      <main id="board"></main>
+    </section>
+    <aside id="chat">
+      <div id="messages" aria-live="polite"></div>
+      <div id="composer">
+        <textarea id="input" rows="3" aria-label="Wiadomość do agenta"></textarea>
+        <div class="buttons">
+          <button type="button" id="send">Wyślij</button>
+          <button type="button" id="stop" hidden>Zatrzymaj</button>
+        </div>
+      </div>
+    </aside>
   </body>
 </html>
