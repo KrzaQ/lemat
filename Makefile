@@ -19,11 +19,12 @@ install: ## Install the Tauri CLI and other npm dependencies
 build: install ## Build the release bundle (src-tauri/target/release/bundle)
 	npm run tauri build
 
-run: install ## Run a development build
-	npm run tauri dev
+run: install ## Run a development build (BOARD=file.md opens that file)
+	npm run tauri dev $(if $(BOARD),-- -- -- "$(abspath $(BOARD))")
 
-test: ## Run the Rust tests
+test: ## Run the Rust tests and the web view tests
 	cd src-tauri && cargo test
+	node --test 'src/*.test.js'
 
 format: ## Format the Rust code
 	cd src-tauri && cargo fmt
