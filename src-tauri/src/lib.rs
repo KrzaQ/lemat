@@ -173,8 +173,16 @@ pub fn run() {
             }
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running Lemat");
+        .build(tauri::generate_context!())
+        .expect("error while building Lemat")
+        .run(|_, event| {
+            // Each engine runs in its own process group, so it outlives
+            // Lemat unless Lemat stops it. Over SSH it would keep running on
+            // the other machine.
+            if let tauri::RunEvent::Exit = event {
+                lejce::cancel_all();
+            }
+        });
 }
 
 #[cfg(test)]
