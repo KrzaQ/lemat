@@ -16,21 +16,26 @@ help: ## Show this help
 install: ## Install the Tauri CLI and other npm dependencies
 	npm install
 
-build: install ## Build the release bundle (src-tauri/target/release/bundle)
+build: install lejce/Cargo.toml ## Build the release bundle (src-tauri/target/release/bundle)
 	npm run tauri build
 
-run: install ## Run a development build (BOARD=file.md opens that file)
+run: install lejce/Cargo.toml ## Run a development build (BOARD=file.md opens that file)
 	npm run tauri dev $(if $(BOARD),-- -- -- "$(abspath $(BOARD))")
 
-test: ## Run the Rust tests and the web view tests
+test: lejce/Cargo.toml ## Run the Rust tests and the web view tests
 	cd src-tauri && cargo test
 	node --test 'src/*.test.js'
 
 format: ## Format the Rust code
 	cd src-tauri && cargo fmt
 
-lint: ## Run clippy
+lint: lejce/Cargo.toml ## Run clippy
 	cd src-tauri && cargo clippy --all-targets -- -D warnings
+
+# Lejce runs the agents. It is a git submodule: a clone without
+# --recurse-submodules has an empty folder, so fetch it then.
+lejce/Cargo.toml:
+	git submodule update --init lejce
 
 push: ## Push main to every remote in REMOTES (default origin)
 	for r in $(REMOTES); do git push $$r main || exit 1; done
