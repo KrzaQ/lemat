@@ -117,7 +117,7 @@ async function load() {
   input.disabled = !state;
   input.placeholder = state
     ? "Powiedz, co dalej… (Enter wysyła, Esc zatrzymuje)"
-    : "Najpierw otwórz plik tablicy.";
+    : "Rozmowa zacznie się, gdy tablica się otworzy.";
   for (const entry of state?.entries ?? []) add(entry);
   setRunning(state?.running ?? false);
   toEnd();

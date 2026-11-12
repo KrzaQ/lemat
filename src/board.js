@@ -11,6 +11,7 @@ const board = document.getElementById("board");
 const note = document.getElementById("note");
 
 let shownPath = null;
+let shownReady = false;
 let shownVersion = -1;
 
 function atBottom() {
@@ -21,9 +22,12 @@ function show(snapshot) {
   if (snapshot.version <= shownVersion) return;
   shownVersion = snapshot.version;
   const samePath = snapshot.path === shownPath;
+  const becameReady = snapshot.ready !== shownReady;
   shownPath = snapshot.path;
-  // The conversation belongs to the board file: load the new file's one.
-  if (!samePath) window.dispatchEvent(new CustomEvent("board-path"));
+  shownReady = snapshot.ready;
+  // The conversation belongs to the board's folder: load it for a new
+  // board, and once a project on another host has connected.
+  if (!samePath || becameReady) window.dispatchEvent(new CustomEvent("board-path"));
 
   if (!snapshot.path) {
     note.textContent = "Otwórz plik Markdown: Plik → Otwórz (⌘O).";
