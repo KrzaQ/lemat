@@ -8,6 +8,7 @@
 //! host = "server"            # an ssh destination; leave out for this machine
 //! folder = "~/notes/math"    # the project folder on that machine
 //! board = "boards/limit.md"  # a project file: the board, inside the folder
+//! hooks = false              # the user's own Claude Code hooks (default: off)
 //! ```
 
 use std::fs;
@@ -28,6 +29,11 @@ pub struct Settings {
     pub folder: Option<String>,
     /// The board a project file opens, relative to `folder`.
     pub board: Option<String>,
+    /// Run the user's own Claude Code hooks in Lemat's sessions. Off by
+    /// default: a hook that binds each session in a folder to something
+    /// (a chat bot, say) must not catch Lemat's session next to the
+    /// user's own one.
+    pub hooks: bool,
     /// MCP servers come in step 3 of the design. Kept here so that a file
     /// written for that step still loads.
     #[serde(rename = "mcp")]
@@ -43,6 +49,7 @@ impl Default for Settings {
             host: None,
             folder: None,
             board: None,
+            hooks: false,
             mcp: None,
         }
     }
@@ -140,6 +147,12 @@ mod tests {
                 folder: Some("/notes/math".into())
             }
         );
+    }
+
+    #[test]
+    fn hooks_are_off_unless_asked() {
+        assert!(!Settings::default().hooks);
+        assert!(Settings::parse("hooks = true").unwrap().hooks);
     }
 
     #[test]
