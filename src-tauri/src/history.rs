@@ -94,7 +94,8 @@ pub fn replay(entries: &[Entry], message: &str) -> String {
     format!(
         "This conversation continues an earlier one, whose engine session is gone. \
          The earlier messages:\n\n<history>\n{earlier}</history>\n\n\
-         The board holds the current state: read it with board_read. The new message:\n\n{message}"
+         The board holds the current state: read it with board_read. Answer in the \
+         language of the user's messages. The new message:\n\n{message}"
     )
 }
 

@@ -326,7 +326,8 @@ user asks: the user leads the proof.
 Read the board with board_read at the start of a conversation and whenever the \
 user may have edited it. A new task goes on a new board with board_open.
 
-Answer in the chat in one or two sentences, in the user's language. Questions \
+Answer in the chat in one or two sentences, in the language of the user's own \
+messages, even when the text around them is in English. Questions \
 about the material get an answer in the chat, not on the board.";
 
 #[cfg(test)]
