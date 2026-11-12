@@ -76,11 +76,14 @@ When it cannot connect, or the folder is missing, a note at the top of
 the board says so, and Lemat tries again every five seconds.
 
 Lemat names the agent's session explicitly, so a Claude Code in a
-terminal in the same folder never gets its conversation. But the
-agent's Claude Code still runs your hooks from its settings. If a hook
-binds to a folder (a chat bridge, say), give Lemat a subfolder of its
-own, such as `~/notes/math/lemat`: Claude Code still reads the
-`CLAUDE.md` files of the folders above it.
+terminal in the same folder never gets its conversation. Lemat also
+turns off your own Claude Code hooks in its sessions, so that a hook
+that binds every session in a folder (a chat bridge, say) catches only
+your terminal session. Set `hooks = true` to keep them.
+
+The project folder can be the same folder where you work in a terminal.
+To keep Lemat's boards apart from your notes, put them in a subfolder:
+`board = "lemat/limit.md"`. The history goes next to the board.
 
 The agent changes the board only through Lemat's own MCP tools:
 `board_step` writes a step, `board_mark` marks it checked (✓) or wrong
