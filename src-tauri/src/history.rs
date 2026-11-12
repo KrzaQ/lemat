@@ -1,5 +1,7 @@
 //! The conversation's history, which Lemat owns: one JSON object per line,
-//! next to the board file (`board.md` → `board.lemat.jsonl`).
+//! in `lemat.jsonl` in the board's folder. All boards in one folder share
+//! one conversation, so the agent keeps its context when it opens another
+//! board there.
 //!
 //! The engine's session only saves sending the history again. A `session`
 //! line records each engine session, so that the next start resumes it.
@@ -41,12 +43,10 @@ pub enum Entry {
     },
 }
 
+pub const FILE: &str = "lemat.jsonl";
+
 pub fn path_for(board: &Path) -> PathBuf {
-    let stem = board
-        .file_stem()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "board".into());
-    board.with_file_name(format!("{stem}.lemat.jsonl"))
+    board.with_file_name(FILE)
 }
 
 /// A missing file is an empty history. A broken line is skipped: one bad
@@ -97,7 +97,7 @@ pub fn replay(entries: &[Entry], message: &str) -> String {
     format!(
         "This conversation continues an earlier one, whose engine session is gone. \
          The earlier messages:\n\n<history>\n{earlier}</history>\n\n\
-         The board file holds the current state. The new message:\n\n{message}"
+         The board holds the current state: read it with board_read. The new message:\n\n{message}"
     )
 }
 
@@ -140,7 +140,7 @@ mod tests {
     fn history_sits_next_to_the_board() {
         assert_eq!(
             path_for(Path::new("/n/granica.md")),
-            PathBuf::from("/n/granica.lemat.jsonl")
+            PathBuf::from("/n/lemat.jsonl")
         );
     }
 

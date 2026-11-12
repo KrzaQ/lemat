@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Mutex;
 
-use lejce::{Answer, Canceller, Conversation, Engine, Error, Host, Session, Setup, Tools};
+use lejce::{Answer, Canceller, Conversation, Engine, Error, McpServer, Session, Setup, Tools};
 use serde::Serialize;
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
@@ -36,10 +36,11 @@ pub struct State {
 }
 
 impl Chat {
-    pub fn start(app: &AppHandle) -> Self {
+    /// `board_tools` is the URL of the board's MCP server.
+    pub fn start(app: &AppHandle, board_tools: String) -> Self {
         let (jobs, inbox) = mpsc::channel();
         let app = app.clone();
-        std::thread::spawn(move || work(app, inbox));
+        std::thread::spawn(move || work(app, inbox, board_tools));
         Self {
             jobs: Mutex::new(jobs),
             running: Mutex::new(None),
@@ -65,25 +66,30 @@ impl Chat {
     }
 }
 
-/// The open engine and what it was opened for. A different board or
-/// different settings need a new engine process.
+/// The open engine and what it was opened for. A board in another folder
+/// (another project) or different settings need a new engine process.
 struct Open {
-    board: PathBuf,
+    folder: PathBuf,
     settings: Settings,
     conversation: Conversation,
 }
 
-fn work(app: AppHandle, inbox: Receiver<Job>) {
+fn work(app: AppHandle, inbox: Receiver<Job>, board_tools: String) {
     let mut open: Option<Open> = None;
     for job in inbox {
         let _ = app.emit("chat-running", true);
-        handle(&app, &mut open, job);
+        handle(&app, &mut open, job, &board_tools);
         let _ = app.emit("chat-running", false);
     }
 }
 
-fn handle(app: &AppHandle, open: &mut Option<Open>, job: Job) {
+fn handle(app: &AppHandle, open: &mut Option<Open>, job: Job, board_tools: &str) {
     let path = history::path_for(&job.board);
+    let folder = job
+        .board
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_default();
     let earlier = history::load(&path);
     let record = |entry: Entry| {
         if let Err(e) = history::append(&path, &entry) {
@@ -102,7 +108,7 @@ fn handle(app: &AppHandle, open: &mut Option<Open>, job: Job) {
     };
     if open
         .as_ref()
-        .is_some_and(|o| o.board != job.board || o.settings != settings)
+        .is_some_and(|o| o.folder != folder || o.settings != settings)
     {
         if let Some(o) = open.take() {
             o.conversation.close();
@@ -120,13 +126,13 @@ fn handle(app: &AppHandle, open: &mut Option<Open>, job: Job) {
                 None
             };
             replay = resume.is_none();
-            match start(&job.board, &settings, resume) {
+            match start(&job.board, &settings, resume, board_tools) {
                 Ok((conversation, new_session)) => {
                     if let Some(entry) = new_session {
                         record(entry);
                     }
                     *open = Some(Open {
-                        board: job.board.clone(),
+                        folder: folder.clone(),
                         settings: settings.clone(),
                         conversation,
                     });
@@ -190,6 +196,7 @@ fn start(
     board: &Path,
     settings: &Settings,
     resume: Option<String>,
+    board_tools: &str,
 ) -> Result<(Conversation, Option<Entry>), Error> {
     let engine = settings.engine().map_err(Error::Setup)?;
     let (session, entry) = match resume {
@@ -207,14 +214,15 @@ fn start(
     let host = settings.host(board);
     let setup = Setup {
         engine,
-        system: system_prompt(board, &host),
+        system: SYSTEM.into(),
         host,
         model: settings.model.clone(),
         effort: settings.effort.clone(),
         project: true,
         tools: Some(Tools {
-            builtin: file_tools(engine),
-            servers: Vec::new(),
+            builtin: reading_tools(engine),
+            // Forwarded, so that an engine on another machine reaches it too.
+            servers: vec![McpServer::http("lemat", board_tools)],
         }),
         session,
         files: std::env::temp_dir().join("lemat-lejce"),
@@ -222,57 +230,47 @@ fn start(
     Ok((Conversation::open(&setup)?, entry))
 }
 
-/// The agent edits the board file with its own file tools until the board
-/// gets MCP tools of its own (step 3 of the design).
-fn file_tools(engine: Engine) -> Vec<String> {
+/// The engine's own tools: only reading, for the user's notes and course
+/// files. The board changes through the board tools, so that the steps and
+/// marks keep their format.
+fn reading_tools(engine: Engine) -> Vec<String> {
     let names: &[&str] = match engine {
-        Engine::Claude => &["Read", "Edit", "Write", "Glob", "Grep"],
-        Engine::Pi => &["read", "edit", "write", "grep", "find", "ls"],
+        Engine::Claude => &["Read", "Glob", "Grep"],
+        Engine::Pi => &["read", "grep", "find", "ls"],
     };
     names.iter().map(|n| n.to_string()).collect()
 }
 
-fn system_prompt(board: &Path, host: &Host) -> String {
-    let remote = if host.is_remote() {
-        " The board file is on the user's machine, not on yours; until Lemat \
-         gives you board tools, tell the user you cannot reach it."
-    } else {
-        ""
-    };
-    format!(
-        "You work with the user in Lemat, a math board. The board is the Markdown \
-         file {board}. Lemat draws it with KaTeX and redraws it whenever the file \
-         changes.{remote}\n\n\
-         The user leads a proof or a calculation one sentence at a time. For each \
-         sentence, write it as the next numbered step in the board file, with \
-         formulas in LaTeX ($...$ inline, $$...$$ on their own line), using your \
-         Edit tool. Then check the step. If it is wrong, keep it and add a line \
-         under it that starts with \"⚠\" and says the mistake in one sentence. Do \
-         not fix the user's step unless they ask: they lead the proof.\n\n\
-         Answer in the chat briefly, in the user's language. Questions about the \
-         material get an answer in the chat, not on the board.",
-        board = board.display()
-    )
-}
+const SYSTEM: &str = "\
+You work with the user in Lemat, a math board. The board is a Markdown document \
+with LaTeX that the user sees next to this conversation. Change it only through \
+the board tools (board_read, board_step, board_mark, board_open), never by \
+editing its file.
+
+The user leads a proof or a calculation, one sentence at a time, often by voice. \
+For each sentence:
+1. Write it as the next step with board_step: a short note in words in the \
+user's language, and the formula in LaTeX if the step has one. Write what the \
+user said, even if it is wrong.
+2. Check the step. Then mark it with board_mark: checked if it is right, wrong \
+with one sentence that says what is wrong.
+3. Do not fix a wrong step and do not take the next step yourself unless the \
+user asks: the user leads the proof.
+
+Read the board with board_read at the start of a conversation and whenever the \
+user may have edited it. A new task goes on a new board with board_open.
+
+Answer in the chat in one or two sentences, in the user's language. Questions \
+about the material get an answer in the chat, not on the board.";
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn prompt_names_the_board() {
-        let host = Host::Local { folder: None };
-        let prompt = system_prompt(Path::new("/n/granica.md"), &host);
-        assert!(prompt.contains("/n/granica.md"));
-        assert!(!prompt.contains("cannot reach"));
-    }
-
-    #[test]
-    fn remote_prompt_warns_about_the_board() {
-        let host = Host::Ssh {
-            destination: "server".into(),
-            folder: None,
-        };
-        assert!(system_prompt(Path::new("/n/b.md"), &host).contains("cannot reach"));
+    fn prompt_names_every_board_tool() {
+        for tool in ["board_read", "board_step", "board_mark", "board_open"] {
+            assert!(SYSTEM.contains(tool), "{tool}");
+        }
     }
 }

@@ -1,6 +1,9 @@
 mod board;
+mod board_tools;
 mod chat;
+mod document;
 mod history;
+mod mcp;
 mod recent;
 mod settings;
 mod source;
@@ -18,6 +21,19 @@ use chat::Chat;
 
 const OPEN: &str = "open";
 const STOP: &str = "stop";
+
+/// The board tools reach the open board through the app.
+struct Desk(AppHandle);
+
+impl board_tools::Desk for Desk {
+    fn current(&self) -> Option<PathBuf> {
+        self.0.state::<Board>().snapshot().path.map(PathBuf::from)
+    }
+
+    fn open(&self, path: PathBuf) {
+        board::open_local(&self.0, path);
+    }
+}
 
 /// The web view asks once on load, because it may miss events sent before
 /// its listener was ready.
@@ -150,7 +166,9 @@ pub fn run() {
             chat_stop
         ])
         .setup(|app| {
-            app.manage(Chat::start(app.handle()));
+            let tools = board_tools::BoardTools::new(Desk(app.handle().clone()));
+            let server = mcp::serve("lemat", tools)?;
+            app.manage(Chat::start(app.handle(), server.url));
             if let Some(path) = first_board(app.handle()) {
                 board::open_local(app.handle(), path);
             }
