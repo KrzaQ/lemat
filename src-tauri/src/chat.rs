@@ -284,6 +284,7 @@ fn start(
         host: host.clone(),
         model: settings.model.clone(),
         effort: settings.effort.clone(),
+        disable_hooks: false,
         project: true,
         tools: Some(Tools {
             builtin: reading_tools(engine),
