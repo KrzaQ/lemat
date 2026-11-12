@@ -2,6 +2,7 @@
   --text: #1d1d1b;
   --muted: #6b6a66;
   --background: #fbfaf7;
+  --note: #f3e6c4;
   color-scheme: light dark;
 }
 
@@ -10,6 +11,7 @@
     --text: #ecebe6;
     --muted: #a3a29c;
     --background: #1f1f1d;
+    --note: #4a3f22;
   }
 }
 
@@ -34,4 +36,16 @@ body {
 #board .katex-display {
   overflow-x: auto;
   overflow-y: hidden;
+}
+
+/* Stays at the top while the last good text remains below it. */
+#note {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin: 0;
+  padding: 0.4rem 1.5rem;
+  background: var(--note);
+  font-size: 0.9rem;
+  text-align: center;
 }
