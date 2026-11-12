@@ -36,6 +36,29 @@ Open a board file with `lemat path/to/board.md`, or with Plik → Otwórz
 start. It redraws the board within a second when the file changes, for
 example after an edit in another editor.
 
+The panel on the right is the conversation with the agent. Type or
+dictate one sentence into the text field and press Enter. The agent
+writes the step on the board and checks it. Esc or ⌘. stops it. Its work
+(thinking, tool calls) stays folded above each answer; click to open it.
+
+Settings live in `lemat.toml` next to the board file. Without the file,
+Lemat runs Claude Code (sonnet) on this machine, in the board's folder:
+
+```toml
+engine = "claude"          # claude or pi
+model = "sonnet"
+effort = "medium"          # optional
+host = "server"            # an ssh destination; leave out for this machine
+folder = "~/notes/math"    # the agent's folder on that machine
+```
+
+Lemat keeps the conversation in `board.lemat.jsonl` next to `board.md`.
+When the engine has lost its session, or you change the engine, Lemat
+sends this history to a new session.
+
+Clone with `--recurse-submodules`: Lejce, which runs the agents, is a git
+submodule. `make` fetches it if the folder is empty.
+
 ## License
 
 MIT or Apache 2.0, at your choice. KaTeX and marked (in `src/vendor/`)
