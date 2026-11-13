@@ -329,6 +329,7 @@ fn start(
             builtin: reading_tools(engine),
             // Forwarded, so that an engine on another machine reaches it too.
             servers: vec![McpServer::http("lemat", board_tools)],
+            permissions: lejce::Permissions::Auto,
         }),
         session,
         files: std::env::temp_dir().join("lemat-lejce"),
