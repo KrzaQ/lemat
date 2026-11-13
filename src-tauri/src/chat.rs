@@ -36,6 +36,9 @@ struct Job {
 pub struct State {
     pub entries: Vec<Entry>,
     pub running: bool,
+    /// The engine and model the next message goes to.
+    pub engine: String,
+    pub model: String,
 }
 
 impl Chat {
@@ -51,9 +54,13 @@ impl Chat {
     }
 
     pub fn state(&self, place: &Place) -> State {
+        let settings = settings_now(&place.project, &place.board)
+            .unwrap_or_else(|_| place.project.settings.clone());
         State {
             entries: history::load(place.project.files.as_ref(), &place.history()),
             running: self.running.lock().unwrap().is_some(),
+            engine: settings.engine,
+            model: settings.model,
         }
     }
 
@@ -91,7 +98,7 @@ fn work(app: AppHandle, inbox: Receiver<Job>, board_tools: String) {
 /// applies to the next message. Where the files live stays as it was when
 /// the project opened: that needs a new connection, so it waits for the
 /// next open.
-fn settings_now(project: &Project, board: &std::path::Path) -> Result<Settings, String> {
+pub fn settings_now(project: &Project, board: &std::path::Path) -> Result<Settings, String> {
     match &project.source {
         Target::Board(_) => Settings::for_board(board),
         Target::Project(file) => {
@@ -102,6 +109,40 @@ fn settings_now(project: &Project, board: &std::path::Path) -> Result<Settings, 
             settings.board.clone_from(&project.settings.board);
             Ok(settings)
         }
+    }
+}
+
+/// Model names to offer for an engine. Claude Code takes its aliases; pi
+/// lists what its providers have, on the machine where it runs.
+pub fn models(engine: &str, host: &Host) -> Vec<String> {
+    match Engine::parse(engine) {
+        Some(Engine::Claude) => ["opus", "sonnet", "haiku"].map(String::from).to_vec(),
+        Some(Engine::Pi) => host
+            .command("pi", &["--list-models".to_string()])
+            .output()
+            .map(|out| pi_models(&String::from_utf8_lossy(&out.stdout)))
+            .unwrap_or_default(),
+        None => Vec::new(),
+    }
+}
+
+/// `pi --list-models` prints a table: provider, model, and more columns.
+fn pi_models(table: &str) -> Vec<String> {
+    table
+        .lines()
+        .skip(1)
+        .filter_map(|line| {
+            let mut words = line.split_whitespace();
+            Some(format!("{}/{}", words.next()?, words.next()?))
+        })
+        .collect()
+}
+
+/// Where the engine of this place runs, with the settings as they are now.
+pub fn engine_host(place: &Place, settings: &Settings) -> Host {
+    match &place.project.source {
+        Target::Board(_) => settings.host(&place.board),
+        Target::Project(_) => place.project.engine.clone(),
     }
 }
 
@@ -168,10 +209,7 @@ fn handle(app: &AppHandle, open: &mut Option<Open>, job: Job, board_tools: &str)
             o.conversation.close();
         }
     }
-    let engine_host = match &place.project.source {
-        Target::Board(_) => settings.host(&place.board),
-        Target::Project(_) => place.project.engine.clone(),
-    };
+    let engine_host = engine_host(place, &settings);
     let host = match &engine_host {
         Host::Ssh { destination, .. } => Some(destination.as_str()),
         Host::Local { .. } => None,
@@ -230,6 +268,7 @@ fn handle(app: &AppHandle, open: &mut Option<Open>, job: Job, board_tools: &str)
                     text,
                     work,
                     time: history::now(),
+                    by: Some(format!("{} · {}", settings.engine, settings.model)),
                 })
             }
             Err(error) => error,
@@ -334,6 +373,13 @@ about the material get an answer in the chat, not on the board.";
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reads_pi_model_table() {
+        let table = "provider  model  context\nlocal  qwen-96k  98K\nother  big  1M\n";
+        assert_eq!(pi_models(table), ["local/qwen-96k", "other/big"]);
+        assert_eq!(models("claude", &Host::Local { folder: None })[0], "opus");
+    }
 
     #[test]
     fn explains_ssh_failures_in_polish() {

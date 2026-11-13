@@ -34,6 +34,9 @@ pub enum Entry {
         text: String,
         work: Value,
         time: i64,
+        /// Who answered: "claude · opus". Missing in older histories.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        by: Option<String>,
     },
     /// A message that ended without an answer: an error, or the user
     /// stopped it.
@@ -126,6 +129,7 @@ mod tests {
             text: text.into(),
             work: json!({}),
             time: 2,
+            by: None,
         }
     }
 

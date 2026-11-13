@@ -68,6 +68,33 @@ fn chat_send(
     Ok(())
 }
 
+/// Saves the engine and model in the project's settings. The next message
+/// goes to them: a new engine gets the history in a new session.
+#[tauri::command]
+fn chat_set_engine(
+    engine: String,
+    model: String,
+    board: tauri::State<'_, Board>,
+) -> Result<(), String> {
+    let place = open_board(&board)?;
+    settings::save_engine(&place.project.settings_file(), &engine, &model)
+}
+
+/// Model names to offer for an engine. For pi this asks pi on the engine's
+/// machine, which may take a moment over SSH.
+#[tauri::command]
+async fn chat_models(
+    engine: String,
+    board: tauri::State<'_, Board>,
+) -> Result<Vec<String>, String> {
+    let place = open_board(&board)?;
+    let settings = chat::settings_now(&place.project, &place.board)?;
+    let host = chat::engine_host(&place, &settings);
+    tauri::async_runtime::spawn_blocking(move || chat::models(&engine, &host))
+        .await
+        .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn chat_stop(chat: tauri::State<'_, Chat>) {
     chat.stop();
@@ -162,7 +189,9 @@ pub fn run() {
             board_current,
             chat_state,
             chat_send,
-            chat_stop
+            chat_stop,
+            chat_set_engine,
+            chat_models
         ])
         .setup(|app| {
             let tools = board_tools::BoardTools::new(Desk(app.handle().clone()));

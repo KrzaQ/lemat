@@ -24,6 +24,7 @@ tauri-plugin-dialog = "2"
 lejce = { path = "../lejce" }
 toml = "0.9"
 tiny_http = "0.12"
+toml_edit = "0.23"
 
 # https://tauri.app/concept/size/#cargo-configuration
 [profile.release]

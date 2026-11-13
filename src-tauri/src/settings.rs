@@ -95,6 +95,25 @@ impl Settings {
     }
 }
 
+/// Writes the engine and the model into a settings file, and keeps the
+/// rest of it as it is, comments too. A missing file is created.
+pub fn save_engine(file: &Path, engine: &str, model: &str) -> Result<(), String> {
+    if Engine::parse(engine).is_none() {
+        return Err(format!("nieznany silnik: {engine}"));
+    }
+    let text = match fs::read_to_string(file) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(format!("{}: {e}", file.display())),
+    };
+    let mut document: toml_edit::DocumentMut = text
+        .parse()
+        .map_err(|e: toml_edit::TomlError| format!("{}: {}", file.display(), e.message()))?;
+    document["engine"] = toml_edit::value(engine);
+    document["model"] = toml_edit::value(model.trim());
+    fs::write(file, document.to_string()).map_err(|e| format!("{}: {e}", file.display()))
+}
+
 /// "~/notes" on this machine. A remote folder stays as it is: the remote
 /// shell expands it.
 pub fn expand_home(folder: &str) -> PathBuf {
@@ -146,6 +165,36 @@ mod tests {
             Host::Local {
                 folder: Some("/notes/math".into())
             }
+        );
+    }
+
+    #[test]
+    fn save_engine_keeps_the_rest() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("p.toml");
+        fs::write(
+            &file,
+            "# my project\nhost = \"server\" # there\nmodel = \"opus\"\n",
+        )
+        .unwrap();
+        save_engine(&file, "pi", "local/qwen").unwrap();
+        let text = fs::read_to_string(&file).unwrap();
+        assert!(
+            text.contains("# my project") && text.contains("# there"),
+            "{text}"
+        );
+        let settings = Settings::parse(&text).unwrap();
+        assert_eq!(settings.engine, "pi");
+        assert_eq!(settings.model, "local/qwen");
+        assert_eq!(settings.host.as_deref(), Some("server"));
+        assert!(save_engine(&file, "gpt", "x").is_err());
+        let new = dir.path().join("lemat.toml");
+        save_engine(&new, "claude", "sonnet").unwrap();
+        assert_eq!(
+            Settings::parse(&fs::read_to_string(&new).unwrap())
+                .unwrap()
+                .model,
+            "sonnet"
         );
     }
 

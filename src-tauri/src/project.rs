@@ -47,6 +47,17 @@ pub struct Project {
     pub engine: Host,
 }
 
+impl Project {
+    /// The file that holds the project's settings: the project file, or
+    /// `lemat.toml` next to a board file.
+    pub fn settings_file(&self) -> PathBuf {
+        match &self.source {
+            Target::Project(file) => file.clone(),
+            Target::Board(board) => board.with_file_name(crate::settings::FILE),
+        }
+    }
+}
+
 /// The open board of a project.
 #[derive(Clone)]
 pub struct Place {
