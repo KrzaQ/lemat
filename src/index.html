@@ -22,6 +22,14 @@
       <div id="composer">
         <textarea id="input" rows="3" aria-label="Wiadomość do agenta"></textarea>
         <div class="buttons">
+          <div class="engine" title="Silnik i model, które odpowiedzą na następną wiadomość">
+            <select id="engine" aria-label="Silnik">
+              <option value="claude">Claude</option>
+              <option value="pi">pi</option>
+            </select>
+            <input id="model" list="models" aria-label="Model" spellcheck="false" />
+            <datalist id="models"></datalist>
+          </div>
           <button type="button" id="send">Wyślij</button>
           <button type="button" id="stop" hidden>Zatrzymaj</button>
         </div>

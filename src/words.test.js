@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { plural, seconds, tokens, workSummary } from "./words.js";
+import { metaLine, plural, seconds, tokens, workSummary } from "./words.js";
 
 const tool = (n) => plural(n, "narzędzie", "narzędzia", "narzędzi");
 
@@ -23,6 +23,13 @@ test("times and tokens stay short", () => {
   assert.equal(tokens(950), "950");
   assert.equal(tokens(41000), "41k");
   assert.equal(tokens(1234), "1.2k");
+});
+
+test("the meta line names who answered", () => {
+  const work = { steps: [{}], seconds: 5 };
+  assert.equal(metaLine("claude · opus", work), "claude · opus · 1 narzędzie · 5 s");
+  assert.equal(metaLine(undefined, work), "1 narzędzie · 5 s");
+  assert.equal(metaLine("pi · local/qwen", null), "pi · local/qwen");
 });
 
 test("work summary", () => {

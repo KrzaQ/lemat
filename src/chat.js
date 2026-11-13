@@ -3,7 +3,7 @@
 // new history entry as an event.
 
 import { drawMarkdown } from "./math.js";
-import { workSummary } from "./words.js";
+import { metaLine, workSummary } from "./words.js";
 
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
@@ -12,6 +12,9 @@ const messages = document.getElementById("messages");
 const input = document.getElementById("input");
 const send = document.getElementById("send");
 const stop = document.getElementById("stop");
+const engine = document.getElementById("engine");
+const model = document.getElementById("model");
+const models = document.getElementById("models");
 
 let live = null;
 
@@ -31,9 +34,9 @@ function toEnd() {
 }
 
 // The work stays folded: the answer matters, the work explains it on click.
-function workView(work, running) {
+function workView(work, running, by) {
   const details = element("details", "work");
-  details.append(element("summary", null, workSummary(work, running)));
+  details.append(element("summary", null, running ? workSummary(work, true) : metaLine(by, work)));
   if (work.thinking) details.append(element("p", "thinking", work.thinking));
   if (work.steps?.length) {
     const list = element("ol", "steps");
@@ -59,7 +62,8 @@ function entryView(entry) {
       return element("div", "message user", entry.text);
     case "agent": {
       const node = element("div", "message agent");
-      if (hasWork(entry.work)) node.append(workView(entry.work, false));
+      if (hasWork(entry.work)) node.append(workView(entry.work, false, entry.by));
+      else if (entry.by) node.append(element("div", "work", entry.by));
       const answer = element("div", "answer");
       drawMarkdown(answer, entry.text);
       node.append(answer);
@@ -120,8 +124,53 @@ async function load() {
     : "Rozmowa zacznie się, gdy tablica się otworzy.";
   for (const entry of state?.entries ?? []) add(entry);
   setRunning(state?.running ?? false);
+  engine.disabled = model.disabled = !state;
+  if (state) {
+    engine.value = state.engine;
+    model.value = state.model;
+    offerModels(state.engine);
+  }
   toEnd();
 }
+
+// The models to suggest. For pi they come from pi itself, on the machine
+// where it runs.
+async function offerModels(name) {
+  let list = [];
+  try {
+    list = await invoke("chat_models", { engine: name });
+  } catch {}
+  models.replaceChildren(...list.map((m) => Object.assign(document.createElement("option"), { value: m })));
+  return list;
+}
+
+// A new engine or model applies to the next message. Lemat saves it in the
+// project's settings; a new engine gets the history in a new session.
+async function saveEngine() {
+  try {
+    await invoke("chat_set_engine", { engine: engine.value, model: model.value.trim() });
+  } catch (error) {
+    add({ kind: "error", text: String(error), work: {} });
+  }
+  input.focus();
+}
+
+engine.addEventListener("change", async () => {
+  const list = await offerModels(engine.value);
+  // A Claude alias means nothing to pi, and the other way round.
+  if (!list.includes(model.value)) model.value = list[0] ?? "";
+  if (model.value) await saveEngine();
+  else model.focus();
+});
+model.addEventListener("change", () => {
+  if (model.value.trim()) saveEngine();
+});
+model.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    model.blur();
+  }
+});
 
 async function submit() {
   const text = input.value.trim();

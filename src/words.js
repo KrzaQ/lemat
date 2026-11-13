@@ -20,6 +20,11 @@ export function tokens(n) {
   return n >= 1000 ? `${(n / 1000).toFixed(1).replace(".0", "")}k` : `${n}`;
 }
 
+// The line above an answer: who answered, then the work.
+export function metaLine(by, work) {
+  return [by, work ? workSummary(work) : ""].filter(Boolean).join(" · ");
+}
+
 // One line about the agent's work: "3 narzędzia · 12 s · 41k → 1.2k".
 export function workSummary(work, running = false) {
   const parts = [];

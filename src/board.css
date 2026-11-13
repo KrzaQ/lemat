@@ -218,7 +218,31 @@ body {
 
 #composer .buttons {
   display: flex;
-  justify-content: flex-end;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+#composer .engine {
+  flex: 1;
+  display: flex;
+  gap: 0.3rem;
+  min-width: 0;
+}
+
+#composer .engine select,
+#composer .engine input {
+  font: inherit;
+  font-size: 0.85rem;
+  color: var(--text);
+  background: var(--background);
+  border: 1px solid var(--line);
+  border-radius: 0.35rem;
+  padding: 0.2rem 0.35rem;
+}
+
+#composer .engine input {
+  flex: 1;
+  min-width: 0;
 }
 
 #composer button {
