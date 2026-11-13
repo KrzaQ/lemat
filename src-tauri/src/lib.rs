@@ -172,8 +172,25 @@ fn board_argument(args: impl Iterator<Item = OsString>) -> Option<PathBuf> {
         .find(|arg| !arg.to_string_lossy().starts_with('-'))
 }
 
+/// An app started from Finder gets a short PATH, without the places where
+/// the engines (claude, pi) and their tools (node) usually live.
+fn extend_path() {
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    if let Some(home) = std::env::var_os("HOME") {
+        dirs.push(PathBuf::from(home).join(".local/bin"));
+    }
+    dirs.extend(["/opt/homebrew/bin", "/usr/local/bin"].map(PathBuf::from));
+    if let Some(path) = std::env::var_os("PATH") {
+        dirs.extend(std::env::split_paths(&path));
+    }
+    if let Ok(joined) = std::env::join_paths(dirs) {
+        std::env::set_var("PATH", joined);
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    extend_path();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(Board::default())
