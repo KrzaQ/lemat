@@ -234,6 +234,9 @@ async function load() {
     engine.value = state.engine;
     model.value = state.model;
     offerModels(state.engine);
+    // A remote project enables the field only after it connects, so the
+    // focus from the start did not take. Dictation needs it there.
+    if (document.activeElement === document.body) input.focus();
   }
   toEnd();
 }
