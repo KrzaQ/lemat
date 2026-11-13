@@ -198,6 +198,80 @@ body {
   }
 }
 
+/* The agent's question */
+
+#question {
+  margin: 0 1rem 0.5rem;
+  padding: 0.75rem 0.9rem;
+  border: 2px solid var(--wrong);
+  border-radius: 0.6rem;
+  background: var(--background);
+}
+
+#question .title {
+  margin: 0 0 0.3rem;
+  font-weight: 600;
+}
+
+#question .text {
+  margin: 0 0 0.4rem;
+}
+
+#question .detail,
+.message.asked .detail {
+  display: block;
+  margin: 0 0 0.5rem;
+  padding: 0.35rem 0.5rem;
+  border-radius: 0.35rem;
+  background: var(--panel);
+  font-size: 0.8rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 10rem;
+  overflow-y: auto;
+}
+
+#question .options {
+  margin: 0 0 0.5rem;
+  padding-left: 1.6rem;
+}
+
+#question .options li {
+  padding: 0.15rem 0.4rem;
+  border-radius: 0.3rem;
+  cursor: pointer;
+}
+
+#question .options li.current {
+  background: var(--user);
+}
+
+#question .options li.ticked::after {
+  content: " ✓";
+  color: var(--checked);
+}
+
+#question .answers {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+#question .hint {
+  flex: 1;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+#question button {
+  font: inherit;
+  padding: 0.3rem 0.9rem;
+}
+
+.message.asked .said {
+  font-size: 0.85rem;
+}
+
 #composer {
   display: flex;
   flex-direction: column;

@@ -19,6 +19,17 @@
     </section>
     <aside id="chat">
       <div id="messages" aria-live="polite"></div>
+      <div id="question" role="alertdialog" aria-live="assertive" hidden>
+        <p class="title"></p>
+        <p class="text"></p>
+        <pre class="detail"></pre>
+        <ol class="options"></ol>
+        <div class="answers">
+          <span class="hint"></span>
+          <button type="button" class="no">Nie (Esc)</button>
+          <button type="button" class="yes">Tak (Enter)</button>
+        </div>
+      </div>
       <div id="composer">
         <textarea id="input" rows="3" aria-label="Wiadomość do agenta"></textarea>
         <div class="buttons">

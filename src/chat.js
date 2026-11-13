@@ -18,6 +18,11 @@ const models = document.getElementById("models");
 
 let live = null;
 
+// The agent's question that waits for an answer, with the option the
+// arrows point at and the options ticked so far.
+const dialog = document.getElementById("question");
+let asked = null;
+
 function element(tag, className, text) {
   const node = document.createElement(tag);
   if (className) node.className = className;
@@ -69,6 +74,13 @@ function entryView(entry) {
       node.append(answer);
       return node;
     }
+    case "question": {
+      const node = element("div", "message asked");
+      node.append(element("div", "work", `Pytanie: ${entry.text}`));
+      if (entry.detail) node.append(element("code", "detail", entry.detail));
+      node.append(element("div", "said", `Odpowiedź: ${entry.answer}`));
+      return node;
+    }
     case "error": {
       const node = element("div", "message agent");
       if (hasWork(entry.work)) node.append(workView(entry.work, false));
@@ -113,6 +125,99 @@ function setRunning(running) {
   if (running && !live) showProgress({});
   if (!running) clearLive();
 }
+
+function drawQuestion() {
+  const q = asked.question;
+  dialog.querySelector(".title").textContent = q.tool
+    ? `Agent chce użyć narzędzia ${q.tool}`
+    : "Agent pyta";
+  dialog.querySelector(".text").textContent = q.text;
+  const detail = dialog.querySelector(".detail");
+  detail.textContent = q.detail;
+  detail.hidden = !q.detail;
+  const list = dialog.querySelector(".options");
+  list.replaceChildren(
+    ...q.options.map((option, i) => {
+      const item = element("li", null, option);
+      item.classList.toggle("current", i === asked.current);
+      item.classList.toggle("ticked", asked.ticked.has(i));
+      item.addEventListener("click", () => {
+        asked.current = i;
+        if (q.multiple) tick();
+        else answer("chose");
+      });
+      return item;
+    }),
+  );
+  list.hidden = q.options.length === 0;
+  const choosing = q.options.length > 0;
+  dialog.querySelector(".yes").textContent = choosing ? "Wybierz (Enter)" : "Tak (Enter)";
+  dialog.querySelector(".no").textContent = choosing ? "Anuluj (Esc)" : "Nie (Esc)";
+  dialog.querySelector(".hint").textContent = !choosing
+    ? ""
+    : q.multiple
+      ? "↑↓ wybór · Spacja zaznacza"
+      : "↑↓ wybór";
+}
+
+function showQuestion(question) {
+  asked = question ? { question, current: 0, ticked: new Set() } : null;
+  dialog.hidden = !asked;
+  if (asked) {
+    drawQuestion();
+    dialog.scrollIntoView({ block: "nearest" });
+  }
+}
+
+function tick() {
+  if (asked.ticked.has(asked.current)) asked.ticked.delete(asked.current);
+  else asked.ticked.add(asked.current);
+  drawQuestion();
+}
+
+function answer(kind) {
+  if (!asked) return;
+  const q = asked.question;
+  let chosen = [];
+  if (kind === "yes" && q.options.length > 0) {
+    kind = "chose";
+  }
+  if (kind === "chose") {
+    chosen = q.multiple && asked.ticked.size > 0 ? [...asked.ticked].sort((a, b) => a - b) : [asked.current];
+  }
+  showQuestion(null);
+  invoke("chat_answer", { kind, chosen });
+  input.focus();
+}
+
+dialog.querySelector(".yes").addEventListener("click", () => answer("yes"));
+dialog.querySelector(".no").addEventListener("click", () => answer("no"));
+
+// While a question waits, its keys come first: a game pad sends A as
+// Return and B as Escape, so these must answer the dialog, not send a
+// message or stop the agent.
+window.addEventListener(
+  "keydown",
+  (event) => {
+    if (!asked || event.isComposing) return;
+    const count = asked.question.options.length;
+    const keys = {
+      Enter: () => answer("yes"),
+      Escape: () => answer("no"),
+      ArrowDown: () => count && ((asked.current = (asked.current + 1) % count), drawQuestion()),
+      ArrowUp: () => count && ((asked.current = (asked.current + count - 1) % count), drawQuestion()),
+      " ": () => asked.question.multiple && tick(),
+    };
+    keys.ArrowRight = keys.ArrowDown;
+    keys.ArrowLeft = keys.ArrowUp;
+    const act = keys[event.key];
+    if (!act) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    act();
+  },
+  { capture: true },
+);
 
 async function load() {
   const state = await invoke("chat_state");
@@ -205,6 +310,7 @@ window.addEventListener("focus", () => {
 await listen("chat", (event) => add(event.payload));
 await listen("chat-progress", (event) => showProgress(event.payload));
 await listen("chat-running", (event) => setRunning(event.payload));
+await listen("chat-question", (event) => showQuestion(event.payload));
 window.addEventListener("board-path", load);
 await load();
 input.focus();
