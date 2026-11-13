@@ -9,6 +9,7 @@
 //! folder = "~/notes/math"    # the project folder on that machine
 //! board = "boards/limit.md"  # a project file: the board, inside the folder
 //! hooks = false              # the user's own Claude Code hooks (default: off)
+//! permissions = "ask"        # ask: the user approves tool calls; auto: the classifier
 //! ```
 
 use std::fs;
@@ -34,6 +35,9 @@ pub struct Settings {
     /// (a chat bot, say) must not catch Lemat's session next to the
     /// user's own one.
     pub hooks: bool,
+    /// Who approves a tool call that the user's own rules do not settle:
+    /// "ask" (the user, in a dialog) or "auto" (Claude Code's classifier).
+    pub permissions: String,
     /// MCP servers come in step 3 of the design. Kept here so that a file
     /// written for that step still loads.
     #[serde(rename = "mcp")]
@@ -50,6 +54,7 @@ impl Default for Settings {
             folder: None,
             board: None,
             hooks: false,
+            permissions: "ask".into(),
             mcp: None,
         }
     }
@@ -70,7 +75,18 @@ impl Settings {
     pub fn parse(text: &str) -> Result<Self, String> {
         let settings: Settings = toml::from_str(text).map_err(|e| e.message().to_string())?;
         settings.engine()?;
+        settings.permissions()?;
         Ok(settings)
+    }
+
+    pub fn permissions(&self) -> Result<lejce::Permissions, String> {
+        match self.permissions.as_str() {
+            "ask" => Ok(lejce::Permissions::Ask),
+            "auto" => Ok(lejce::Permissions::Auto),
+            other => Err(format!(
+                "permissions to \"ask\" albo \"auto\", nie \"{other}\""
+            )),
+        }
     }
 
     pub fn engine(&self) -> Result<Engine, String> {
@@ -196,6 +212,17 @@ mod tests {
                 .model,
             "sonnet"
         );
+    }
+
+    #[test]
+    fn permissions_default_to_asking() {
+        assert_eq!(
+            Settings::default().permissions().unwrap(),
+            lejce::Permissions::Ask
+        );
+        let auto = Settings::parse("permissions = \"auto\"").unwrap();
+        assert_eq!(auto.permissions().unwrap(), lejce::Permissions::Auto);
+        assert!(Settings::parse("permissions = \"maybe\"").is_err());
     }
 
     #[test]

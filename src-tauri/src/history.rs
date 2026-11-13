@@ -38,6 +38,14 @@ pub enum Entry {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         by: Option<String>,
     },
+    /// The agent asked the user (a tool call to allow, or a choice), and
+    /// what the user answered.
+    Question {
+        text: String,
+        detail: String,
+        answer: String,
+        time: i64,
+    },
     /// A message that ended without an answer: an error, or the user
     /// stopped it.
     Error {

@@ -95,6 +95,17 @@ async fn chat_models(
         .map_err(|e| e.to_string())
 }
 
+/// The user's answer to the agent's question: "yes", "no", or "chose"
+/// with the indexes of the chosen options.
+#[tauri::command]
+fn chat_answer(kind: String, chosen: Vec<usize>, chat: tauri::State<'_, Chat>) {
+    chat.answer(match kind.as_str() {
+        "yes" => lejce::Answer::Yes,
+        "chose" => lejce::Answer::Chose(chosen),
+        _ => lejce::Answer::No,
+    });
+}
+
 #[tauri::command]
 fn chat_stop(chat: tauri::State<'_, Chat>) {
     chat.stop();
@@ -208,7 +219,8 @@ pub fn run() {
             chat_send,
             chat_stop,
             chat_set_engine,
-            chat_models
+            chat_models,
+            chat_answer
         ])
         .setup(|app| {
             let tools = board_tools::BoardTools::new(Desk(app.handle().clone()));

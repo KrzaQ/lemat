@@ -10,7 +10,8 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 
 use lejce::{
-    Answer, Canceller, Conversation, Engine, Error, Host, McpServer, Session, Setup, Tools,
+    Answer, Canceller, Conversation, Engine, Error, Host, McpServer, Permissions, Question,
+    Session, Setup, Tools,
 };
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -24,6 +25,8 @@ pub struct Chat {
     jobs: Mutex<Sender<Job>>,
     /// Set while a message runs, so that Stop can reach its engine.
     running: Mutex<Option<Canceller>>,
+    /// Set while the agent waits for the user's answer to a question.
+    pending: Mutex<Option<Sender<Answer>>>,
 }
 
 struct Job {
@@ -50,6 +53,7 @@ impl Chat {
         Self {
             jobs: Mutex::new(jobs),
             running: Mutex::new(None),
+            pending: Mutex::new(None),
         }
     }
 
@@ -68,12 +72,87 @@ impl Chat {
         let _ = self.jobs.lock().unwrap().send(Job { place, text });
     }
 
-    /// Stops the running message, with the tools the engine started.
+    /// Stops the running message, with the tools the engine started. A
+    /// question that waits for the user ends unanswered.
     pub fn stop(&self) {
         if let Some(canceller) = *self.running.lock().unwrap() {
             canceller.cancel();
         }
+        self.answer(Answer::Unanswered);
     }
+
+    /// The user's answer to the question the agent waits on.
+    pub fn answer(&self, answer: Answer) {
+        if let Some(waiting) = self.pending.lock().unwrap().take() {
+            let _ = waiting.send(answer);
+        }
+    }
+}
+
+/// A question as the web view shows it.
+#[derive(Serialize, Clone)]
+struct QuestionView<'a> {
+    tool: Option<&'a str>,
+    text: &'a str,
+    detail: &'a str,
+    options: &'a [String],
+    multiple: bool,
+}
+
+/// The answer in words, for the history.
+fn said(answer: &Answer, question: &Question) -> String {
+    match answer {
+        Answer::Yes => "tak".into(),
+        Answer::No => "nie".into(),
+        Answer::Unanswered => "bez odpowiedzi".into(),
+        Answer::Chose(chosen) => chosen
+            .iter()
+            .filter_map(|&i| question.options.get(i).cloned())
+            .collect::<Vec<_>>()
+            .join(", "),
+    }
+}
+
+/// Asks the user in a dialog and waits. The window comes to the front, so
+/// that the keys of a game pad (Return, Escape, arrows) reach the dialog.
+fn ask_user(app: &AppHandle, question: &Question, record: &dyn Fn(Entry)) -> Answer {
+    // The board's own tools only write steps and marks. A dialog for each
+    // step would bury the proof in questions.
+    if question
+        .tool
+        .as_deref()
+        .is_some_and(|t| t.starts_with("mcp__lemat__"))
+    {
+        return Answer::Yes;
+    }
+    let (answer_to, answers) = mpsc::channel();
+    *app.state::<Chat>().pending.lock().unwrap() = Some(answer_to);
+    let view = QuestionView {
+        tool: question.tool.as_deref(),
+        text: &question.text,
+        detail: &question.detail,
+        options: &question.options,
+        multiple: question.multiple,
+    };
+    let _ = app.emit("chat-question", view);
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+    let answer = answers.recv().unwrap_or(Answer::Unanswered);
+    app.state::<Chat>().pending.lock().unwrap().take();
+    let _ = app.emit("chat-question", Value::Null);
+    let text = match &question.tool {
+        Some(tool) => format!("{tool}: {}", question.text),
+        None => question.text.clone(),
+    };
+    record(Entry::Question {
+        text,
+        detail: question.detail.clone(),
+        answer: said(&answer, question),
+        time: history::now(),
+    });
+    answer
 }
 
 /// The open engine and what it was opened for. Another project, a board
@@ -256,8 +335,7 @@ fn handle(app: &AppHandle, open: &mut Option<Open>, job: Job, board_tools: &str)
             &|activity| {
                 let _ = app.emit("chat-progress", activity.to_json());
             },
-            // Questions in a dialog are a later step of the design.
-            &|_| Answer::Unanswered,
+            &|question| ask_user(app, question, &record),
         );
         *app.state::<Chat>().running.lock().unwrap() = None;
 
@@ -305,6 +383,7 @@ fn start(
     board_tools: &str,
 ) -> Result<(Conversation, Option<Entry>), Error> {
     let engine = settings.engine().map_err(Error::Setup)?;
+    let permissions = settings.permissions().map_err(Error::Setup)?;
     let (session, entry) = match resume {
         Some(id) => (Session::Resume(id), None),
         None => {
@@ -326,10 +405,10 @@ fn start(
         disable_hooks: !settings.hooks,
         project: true,
         tools: Some(Tools {
-            builtin: reading_tools(engine),
+            builtin: builtin_tools(engine, permissions),
             // Forwarded, so that an engine on another machine reaches it too.
             servers: vec![McpServer::http("lemat", board_tools)],
-            permissions: lejce::Permissions::Auto,
+            permissions,
         }),
         session,
         files: std::env::temp_dir().join("lemat-lejce"),
@@ -337,13 +416,16 @@ fn start(
     Ok((Conversation::open(&setup)?, entry))
 }
 
-/// The engine's own tools: only reading, for the user's notes and course
-/// files. The board changes through the board tools, so that the steps and
-/// marks keep their format.
-fn reading_tools(engine: Engine) -> Vec<String> {
-    let names: &[&str] = match engine {
-        Engine::Claude => &["Read", "Glob", "Grep"],
-        Engine::Pi => &["read", "grep", "find", "ls"],
+/// The engine's own tools: reading, for the user's notes and course files,
+/// and for Claude a shell when the user approves each command, to check a
+/// computation. The board changes through the board tools, so that the
+/// steps and marks keep their format. pi gets no shell: its questions come
+/// only from extensions the user may not have.
+fn builtin_tools(engine: Engine, permissions: Permissions) -> Vec<String> {
+    let names: &[&str] = match (engine, permissions) {
+        (Engine::Claude, Permissions::Ask) => &["Read", "Glob", "Grep", "Bash"],
+        (Engine::Claude, Permissions::Auto) => &["Read", "Glob", "Grep"],
+        (Engine::Pi, _) => &["read", "grep", "find", "ls"],
     };
     names.iter().map(|n| n.to_string()).collect()
 }
@@ -364,6 +446,9 @@ with one sentence that says what is wrong.
 3. Do not fix a wrong step and do not take the next step yourself unless the \
 user asks: the user leads the proof.
 
+If you have a shell, you may run a short computation to check a step, \
+for example with python; the user approves each command first.
+
 Read the board with board_read at the start of a conversation and whenever the \
 user may have edited it. A new task goes on a new board with board_open.
 
@@ -374,6 +459,26 @@ about the material get an answer in the chat, not on the board.";
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn answers_read_as_words() {
+        let question = Question {
+            options: vec!["a".into(), "b".into(), "c".into()],
+            ..Question::default()
+        };
+        assert_eq!(said(&Answer::Yes, &question), "tak");
+        assert_eq!(said(&Answer::Chose(vec![0, 2]), &question), "a, c");
+        assert_eq!(said(&Answer::Unanswered, &question), "bez odpowiedzi");
+    }
+
+    #[test]
+    fn shell_only_when_the_user_approves() {
+        assert!(builtin_tools(Engine::Claude, Permissions::Ask).contains(&"Bash".to_string()));
+        assert!(!builtin_tools(Engine::Claude, Permissions::Auto).contains(&"Bash".to_string()));
+        assert!(!builtin_tools(Engine::Pi, Permissions::Ask)
+            .iter()
+            .any(|t| t == "bash"));
+    }
 
     #[test]
     fn reads_pi_model_table() {
