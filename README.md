@@ -43,6 +43,13 @@ dictate one sentence into the text field and press Enter. The agent
 writes the step on the board and checks it. Esc or ⌘. stops it. Its work
 (thinking, tool calls) stays folded above each answer; click to open it.
 
+When the agent wants to run a command, or an engine extension asks
+something, a dialog shows the question. Return answers yes (or takes
+the option), Escape answers no, the arrows move between options. A game
+pad through Kuterlapa works the same way. Lemat's own board tools need
+no question. With `permissions = "auto"` in the settings, Claude Code's
+classifier decides instead, and the agent gets no shell.
+
 Under the text field you choose the engine and the model for the next
 message. Lemat saves them in the settings file. A new engine gets the
 conversation so far in a new session. Each answer says who gave it.
