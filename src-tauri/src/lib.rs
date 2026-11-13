@@ -221,13 +221,19 @@ pub fn run() {
         })
         .build(tauri::generate_context!())
         .expect("error while building Lemat")
-        .run(|_, event| {
+        .run(|app, event| match event {
             // Each engine runs in its own process group, so it outlives
             // Lemat unless Lemat stops it. Over SSH it would keep running on
             // the other machine.
-            if let tauri::RunEvent::Exit = event {
-                lejce::cancel_all();
+            tauri::RunEvent::Exit => lejce::cancel_all(),
+            // A board or project file opened from Finder ("Open With").
+            #[cfg(target_os = "macos")]
+            tauri::RunEvent::Opened { urls } => {
+                if let Some(path) = urls.iter().find_map(|url| url.to_file_path().ok()) {
+                    board::open(app, project::Target::from_path(path));
+                }
             }
+            _ => {}
         });
 }
 
