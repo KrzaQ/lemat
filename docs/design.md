@@ -80,4 +80,4 @@ forward = true             # forward it to the agent's machine with ssh -R
 3. Done: the board's MCP server and its tools (`docs/board-format.md`).
 4. Done: SSH hosts with forwarded MCP servers, the board and history there.
 5. Questions from the agent in a dialog.
-6. History, and switching engines in a conversation.
+6. Done: history, and switching engines in a conversation.

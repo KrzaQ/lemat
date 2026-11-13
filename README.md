@@ -21,12 +21,14 @@ Status: early. `docs/design.md` describes the plan.
 Needs Rust and Node.js.
 
 ```sh
-make install
+make install  # build Lemat.app, put it in ~/Applications, link `lemat` in ~/.local/bin
 make run      # development build with live reload
-make build    # release bundle
+make build    # only build Lemat.app
 ```
 
-`make help` lists all targets.
+`make help` lists all targets. `APP_DIR` and `BIN_DIR` change where
+`make install` puts the app and the link. In Finder, Open With → Lemat
+opens a board (`.md`) or a project file (`.toml`).
 
 ## Use
 
@@ -40,6 +42,10 @@ The panel on the right is the conversation with the agent. Type or
 dictate one sentence into the text field and press Enter. The agent
 writes the step on the board and checks it. Esc or ⌘. stops it. Its work
 (thinking, tool calls) stays folded above each answer; click to open it.
+
+Under the text field you choose the engine and the model for the next
+message. Lemat saves them in the settings file. A new engine gets the
+conversation so far in a new session. Each answer says who gave it.
 
 Settings live in `lemat.toml` next to the board file. Without the file,
 Lemat runs Claude Code (sonnet) on this machine, in the board's folder:
